@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from flwr_trees.estimators import (
+    FederatedHistogramRFClassifier,
+    FederatedHistogramRFRegressor,
     FederatedRandomForestClassifier,
     FederatedRandomForestRegressor,
     FederatedXGBClassifier,
@@ -15,4 +17,6 @@ __all__ = [
     "FederatedRandomForestRegressor",
     "FederatedXGBClassifier",
     "FederatedXGBRegressor",
+    "FederatedHistogramRFClassifier",
+    "FederatedHistogramRFRegressor",
 ]
