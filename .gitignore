@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Editors / OS
+.idea/
+.vscode/
+*.DS_Store
+
+# pytest / mypy / ruff caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Claude Code session files
+.claude/
