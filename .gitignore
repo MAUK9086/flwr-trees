@@ -21,3 +21,6 @@ wheels/
 
 # Claude Code session files
 .claude/
+
+# Generated benchmark output
+benchmarks/real_world_results.json
