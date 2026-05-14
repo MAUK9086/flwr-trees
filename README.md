@@ -1,6 +1,6 @@
 # flwr-trees
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
 ![Tests](https://img.shields.io/badge/tests-171%20passing-brightgreen)
 ![CI](https://github.com/MAUK9086/flwr-trees/actions/workflows/ci.yml/badge.svg)
@@ -45,7 +45,7 @@ Bagging and histogram strategies are implemented using real Flower `Strategy` / 
 
 ## Installation
 
-Requires **Python >= 3.10**.
+Requires **Python >= 3.11**.
 
 > **PyPI release coming soon.** Install from source for now.
 > ```bash
