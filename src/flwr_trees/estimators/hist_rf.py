@@ -103,6 +103,8 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
         max_depth: int | None = None,
         n_bins: int = 32,
         use_flower: bool = False,
+        feature_ranges: np.ndarray | None = None,
+        metadata_epsilon: float = 5.0,
         random_state: int | None = None,
     ) -> None:
         super().__init__(
@@ -116,6 +118,8 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
         self.max_depth = max_depth
         self.n_bins = n_bins
         self.use_flower = use_flower
+        self.feature_ranges = feature_ranges
+        self.metadata_epsilon = metadata_epsilon
 
     def fit(
         self,
@@ -146,11 +150,6 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
         n_samples, n_features = X_np.shape
         effective_clients = max(1, min(self.n_clients, n_samples))
 
-        global_edges: list[NDArray] = [
-            np.histogram_bin_edges(X_np[:, f], bins=self.n_bins)
-            for f in range(n_features)
-        ]
-
         rng = np.random.default_rng(self.random_state)
         partitions = simulate_clients(
             X_np,
@@ -161,10 +160,19 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
             random_state=rng,
         )
 
-        if self.use_flower:
-            self._run_flower_fit(partitions, le, rng, global_edges)
+        if self.feature_ranges is not None:
+            ranges = np.asarray(self.feature_ranges)
+            global_edges: list[NDArray] | None = [
+                np.linspace(ranges[f, 0], ranges[f, 1], self.n_bins + 1)
+                for f in range(n_features)
+            ]
         else:
-            self._run_local_fit(partitions, le, rng, global_edges)
+            global_edges = None  # Option A: DP Round 0 will compute edges
+
+        if self.use_flower:
+            self._run_flower_fit(partitions, le, rng, global_edges, n_features)
+        else:
+            self._run_local_fit(partitions, le, rng, global_edges, n_features)
 
         return self
 
@@ -173,9 +181,26 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
         partitions: list[tuple[NDArray, NDArray]],
         le: LabelEncoder,
         rng: np.random.Generator,
-        global_edges: list[NDArray],
+        global_edges: list[NDArray] | None,
+        n_features: int,
     ) -> None:
         """Train locally: aggregate histograms in memory, then train RF per partition."""
+        if global_edges is None:
+            # Option A: DP-noised range exchange across partitions
+            rng_dp = np.random.default_rng(self.random_state)
+            noise_scale = 1.0 / self.metadata_epsilon
+            all_mins = np.array([[X_i[:, f].min() for f in range(n_features)] for X_i, _ in partitions])
+            all_maxs = np.array([[X_i[:, f].max() for f in range(n_features)] for X_i, _ in partitions])
+            noisy_mins = all_mins + rng_dp.laplace(0, noise_scale, all_mins.shape)
+            noisy_maxs = all_maxs + rng_dp.laplace(0, noise_scale, all_maxs.shape)
+            global_min = noisy_mins.min(axis=0)
+            global_max = noisy_maxs.max(axis=0)
+            global_max = np.maximum(global_max, global_min + 1e-6)
+            global_edges = [
+                np.linspace(global_min[f], global_max[f], self.n_bins + 1)
+                for f in range(n_features)
+            ]
+
         self.thresholds_ = global_edges
         self.estimators_: list[DecisionTreeClassifier] = []
 
@@ -208,14 +233,13 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
         partitions: list[tuple[NDArray, NDArray]],
         le: LabelEncoder,
         rng: np.random.Generator,
-        global_edges: list[NDArray],
+        global_edges: list[NDArray] | None,
+        n_features: int,
     ) -> None:
-        """Drive the two-round FL loop via Flower Strategy + NumPyClient types.
+        """Drive the FL loop via Flower Strategy + NumPyClient types.
 
-        Round 1: all clients send histograms → strategy aggregates → returns
-        global thresholds.
-        Round 2+: all clients receive thresholds, train RF, send trees →
-        strategy collects trees.
+        Option C (feature_ranges provided): 2-round protocol (histogram + tree rounds).
+        Option A (feature_ranges=None): 3-round protocol (metadata + histogram + tree rounds).
         """
         from flwr.common import FitIns, ndarrays_to_parameters
 
@@ -244,8 +268,37 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
                 random_state=client_seed,
                 global_edges=global_edges,
                 task="classify",
+                metadata_epsilon=self.metadata_epsilon,
             )
             proxies.append(_LocalHistogramProxy(cid=str(client_idx), client=client))
+
+        if global_edges is not None:
+            # Option C: edges pre-agreed, skip Round 0
+            edge_params = ndarrays_to_parameters(global_edges)
+        else:
+            # Option A: Round 0 — DP metadata exchange to determine global edges
+            edge_params, _ = strategy.aggregate_fit(
+                server_round=0,
+                results=[
+                    (
+                        proxy,
+                        proxy.fit(
+                            FitIns(
+                                parameters=ndarrays_to_parameters([]),
+                                config={"phase": "metadata"},
+                            ),
+                            timeout=None,
+                            group_id=None,
+                        ),
+                    )
+                    for proxy in proxies
+                ],
+                failures=[],
+            )
+            # Update client global_edges with server-computed edges
+            server_edges = strategy.global_edges_
+            for proxy in proxies:
+                proxy._client.global_edges = server_edges
 
         # Round 1: histogram exchange
         threshold_params, _ = strategy.aggregate_fit(
@@ -255,7 +308,7 @@ class FederatedHistogramRFClassifier(ClassifierMixin, BaseFederatedTreeEstimator
                     proxy,
                     proxy.fit(
                         FitIns(
-                            parameters=ndarrays_to_parameters([]),
+                            parameters=edge_params,
                             config={"phase": "histogram"},
                         ),
                         timeout=None,
@@ -393,6 +446,8 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
         max_depth: int | None = None,
         n_bins: int = 32,
         use_flower: bool = False,
+        feature_ranges: np.ndarray | None = None,
+        metadata_epsilon: float = 5.0,
         random_state: int | None = None,
     ) -> None:
         super().__init__(
@@ -406,6 +461,8 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
         self.max_depth = max_depth
         self.n_bins = n_bins
         self.use_flower = use_flower
+        self.feature_ranges = feature_ranges
+        self.metadata_epsilon = metadata_epsilon
 
     def fit(
         self,
@@ -431,11 +488,6 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
         n_samples, n_features = X_np.shape
         effective_clients = max(1, min(self.n_clients, n_samples))
 
-        global_edges: list[NDArray] = [
-            np.histogram_bin_edges(X_np[:, f], bins=self.n_bins)
-            for f in range(n_features)
-        ]
-
         rng = np.random.default_rng(self.random_state)
         partitions = simulate_clients(
             X_np,
@@ -446,10 +498,19 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
             random_state=rng,
         )
 
-        if self.use_flower:
-            self._run_flower_fit(partitions, rng, global_edges)
+        if self.feature_ranges is not None:
+            ranges = np.asarray(self.feature_ranges)
+            global_edges: list[NDArray] | None = [
+                np.linspace(ranges[f, 0], ranges[f, 1], self.n_bins + 1)
+                for f in range(n_features)
+            ]
         else:
-            self._run_local_fit(partitions, rng, global_edges)
+            global_edges = None  # Option A: DP Round 0 will compute edges
+
+        if self.use_flower:
+            self._run_flower_fit(partitions, rng, global_edges, n_features)
+        else:
+            self._run_local_fit(partitions, rng, global_edges, n_features)
 
         return self
 
@@ -457,9 +518,26 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
         self,
         partitions: list[tuple[NDArray, NDArray]],
         rng: np.random.Generator,
-        global_edges: list[NDArray],
+        global_edges: list[NDArray] | None,
+        n_features: int,
     ) -> None:
         """Train locally: bin features, train RF per partition."""
+        if global_edges is None:
+            # Option A: DP-noised range exchange across partitions
+            rng_dp = np.random.default_rng(self.random_state)
+            noise_scale = 1.0 / self.metadata_epsilon
+            all_mins = np.array([[X_i[:, f].min() for f in range(n_features)] for X_i, _ in partitions])
+            all_maxs = np.array([[X_i[:, f].max() for f in range(n_features)] for X_i, _ in partitions])
+            noisy_mins = all_mins + rng_dp.laplace(0, noise_scale, all_mins.shape)
+            noisy_maxs = all_maxs + rng_dp.laplace(0, noise_scale, all_maxs.shape)
+            global_min = noisy_mins.min(axis=0)
+            global_max = noisy_maxs.max(axis=0)
+            global_max = np.maximum(global_max, global_min + 1e-6)
+            global_edges = [
+                np.linspace(global_min[f], global_max[f], self.n_bins + 1)
+                for f in range(n_features)
+            ]
+
         self.thresholds_ = global_edges
         self.estimators_: list[DecisionTreeRegressor] = []
 
@@ -490,9 +568,14 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
         self,
         partitions: list[tuple[NDArray, NDArray]],
         rng: np.random.Generator,
-        global_edges: list[NDArray],
+        global_edges: list[NDArray] | None,
+        n_features: int,
     ) -> None:
-        """Drive the two-round FL loop via Flower Strategy + NumPyClient types."""
+        """Drive the FL loop via Flower Strategy + NumPyClient types.
+
+        Option C (feature_ranges provided): 2-round protocol (histogram + tree rounds).
+        Option A (feature_ranges=None): 3-round protocol (metadata + histogram + tree rounds).
+        """
         from flwr.common import FitIns, ndarrays_to_parameters
 
         from flwr_trees.aggregation.histogram import (
@@ -519,8 +602,37 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
                 random_state=client_seed,
                 global_edges=global_edges,
                 task="regress",
+                metadata_epsilon=self.metadata_epsilon,
             )
             proxies.append(_LocalHistogramProxy(cid=str(client_idx), client=client))
+
+        if global_edges is not None:
+            # Option C: edges pre-agreed, skip Round 0
+            edge_params = ndarrays_to_parameters(global_edges)
+        else:
+            # Option A: Round 0 — DP metadata exchange to determine global edges
+            edge_params, _ = strategy.aggregate_fit(
+                server_round=0,
+                results=[
+                    (
+                        proxy,
+                        proxy.fit(
+                            FitIns(
+                                parameters=ndarrays_to_parameters([]),
+                                config={"phase": "metadata"},
+                            ),
+                            timeout=None,
+                            group_id=None,
+                        ),
+                    )
+                    for proxy in proxies
+                ],
+                failures=[],
+            )
+            # Update client global_edges with server-computed edges
+            server_edges = strategy.global_edges_
+            for proxy in proxies:
+                proxy._client.global_edges = server_edges
 
         # Round 1: histogram exchange
         threshold_params, _ = strategy.aggregate_fit(
@@ -530,7 +642,7 @@ class FederatedHistogramRFRegressor(RegressorMixin, BaseFederatedTreeEstimator):
                     proxy,
                     proxy.fit(
                         FitIns(
-                            parameters=ndarrays_to_parameters([]),
+                            parameters=edge_params,
                             config={"phase": "histogram"},
                         ),
                         timeout=None,

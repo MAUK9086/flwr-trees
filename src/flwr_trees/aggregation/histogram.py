@@ -69,6 +69,10 @@ class HistogramClient(NumPyClient):
     task : str
         ``"classify"`` or ``"regress"`` — selects RandomForestClassifier or
         RandomForestRegressor for the training phase.
+    metadata_epsilon : float
+        DP privacy budget for the metadata (range) phase.  Laplace noise with
+        scale ``1/metadata_epsilon`` is added to local per-feature min/max
+        before sending.
     """
 
     def __init__(
@@ -79,8 +83,9 @@ class HistogramClient(NumPyClient):
         n_estimators: int,
         max_depth: int | None,
         random_state: int | None,
-        global_edges: list[NDArray],
+        global_edges: list[NDArray] | None,
         task: str = "classify",
+        metadata_epsilon: float = 5.0,
     ) -> None:
         self.X_i = X_i
         self.y_i = y_i
@@ -90,6 +95,7 @@ class HistogramClient(NumPyClient):
         self.random_state = random_state
         self.global_edges = global_edges
         self.task = task
+        self.metadata_epsilon = metadata_epsilon
         self.trees_: list[DecisionTreeClassifier | DecisionTreeRegressor] | None = None
 
     def fit(
@@ -120,9 +126,23 @@ class HistogramClient(NumPyClient):
             Empty dict.
         """
         phase = str(config.get("phase", "histogram"))
+        if phase == "metadata":
+            return self._compute_metadata()
         if phase == "histogram":
             return self._compute_histograms()
         return self._train_forest(parameters)
+
+    def _compute_metadata(self) -> tuple[NDArrays, int, dict[str, Scalar]]:
+        """Send DP-noised local per-feature min/max for Round 0 range exchange."""
+        rng = np.random.default_rng(self.random_state)
+        noise_scale = 1.0 / self.metadata_epsilon
+        arrays: NDArrays = []
+        for f in range(self.X_i.shape[1]):
+            local_min = float(self.X_i[:, f].min()) + rng.laplace(0.0, noise_scale)
+            local_max = float(self.X_i[:, f].max()) + rng.laplace(0.0, noise_scale)
+            arrays.append(np.array([local_min], dtype=np.float64))
+            arrays.append(np.array([local_max], dtype=np.float64))
+        return arrays, int(len(self.y_i)), {}
 
     def _compute_histograms(self) -> tuple[NDArrays, int, dict[str, Scalar]]:
         """Compute per-feature histograms on the pre-agreed global grid."""
@@ -310,6 +330,8 @@ class FedHistogramAggregation(Strategy):
         self.bytes_saved_vs_bagging: list[int] = []
         self.trees_: list[DecisionTreeClassifier | DecisionTreeRegressor] = []
         self.thresholds_: list[NDArray] = []
+        self.global_edges_: list[NDArray] = []
+        self._histogram_bytes: int = 0
 
     def initialize_parameters(
         self,
@@ -359,9 +381,45 @@ class FedHistogramAggregation(Strategy):
         )
         self.bytes_sent_per_round.append(round_bytes)
 
+        if server_round == 0:
+            return self._aggregate_metadata(results, round_bytes)
         if server_round == 1:
             return self._aggregate_histograms(results, round_bytes)
         return self._aggregate_trees(results, round_bytes)
+
+    def _aggregate_metadata(
+        self,
+        results: list[tuple[ClientProxy, FitRes]],
+        round_bytes: int,
+    ) -> tuple[Parameters, dict[str, Scalar]]:
+        """Aggregate DP-noised per-feature min/max from clients; compute global edges."""
+        all_arrays = [
+            parameters_to_ndarrays(fit_res.parameters) for _, fit_res in results
+        ]
+        # Each client sends 2 * n_features arrays: [min_f0, max_f0, min_f1, max_f1, ...]
+        n_features = len(all_arrays[0]) // 2
+
+        global_min = np.array([
+            min(client_arrays[f * 2][0] for client_arrays in all_arrays)
+            for f in range(n_features)
+        ])
+        global_max = np.array([
+            max(client_arrays[f * 2 + 1][0] for client_arrays in all_arrays)
+            for f in range(n_features)
+        ])
+        global_max = np.maximum(global_max, global_min + 1e-6)
+
+        self.global_edges_ = [
+            np.linspace(global_min[f], global_max[f], self.n_bins + 1)
+            for f in range(n_features)
+        ]
+        logger.info(
+            "Metadata round: %d bytes from %d clients, %d features",
+            round_bytes,
+            len(results),
+            n_features,
+        )
+        return ndarrays_to_parameters(self.global_edges_), {}
 
     def _aggregate_histograms(
         self,
@@ -369,6 +427,7 @@ class FedHistogramAggregation(Strategy):
         round_bytes: int,
     ) -> tuple[Parameters, dict[str, Scalar]]:
         """Sum per-feature histogram counts; extract shared bin edges."""
+        self._histogram_bytes = round_bytes
         all_arrays = [
             parameters_to_ndarrays(fit_res.parameters) for _, fit_res in results
         ]
@@ -404,8 +463,6 @@ class FedHistogramAggregation(Strategy):
         round_bytes: int,
     ) -> tuple[Parameters, dict[str, Scalar]]:
         """Deserialise and collect all trees; compute communication savings."""
-        histogram_bytes = self.bytes_sent_per_round[0] if self.bytes_sent_per_round else 0
-
         for _, fit_res in results:
             for arr in parameters_to_ndarrays(fit_res.parameters):
                 tree = pickle.loads(arr.tobytes())
@@ -413,7 +470,7 @@ class FedHistogramAggregation(Strategy):
 
         # Savings = what bagging would have cost in round 1 (= tree bytes now)
         # minus what histogram actually cost. Positive ↔ histograms are cheaper.
-        savings = round_bytes - histogram_bytes
+        savings = round_bytes - self._histogram_bytes
         self.bytes_saved_vs_bagging = [savings]
 
         logger.info(
