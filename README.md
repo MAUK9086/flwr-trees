@@ -348,7 +348,7 @@ If you use flwr-trees in research, please cite:
 @software{flwr_trees_2025,
   author = {Mauktik},
   title = {flwr-trees: Federated Learning with Tree-Based Models},
-  year = {2025},
+  year = {2026},
   url = {https://github.com/MAUK9086/flwr-trees},
 }
 ```
