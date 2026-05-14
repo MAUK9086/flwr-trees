@@ -1,5 +1,10 @@
 # flwr-trees
 
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-Apache%202.0-green)
+![Tests](https://img.shields.io/badge/tests-171%20passing-brightgreen)
+![CI](https://github.com/MAUK9086/flwr-trees/actions/workflows/ci.yml/badge.svg)
+
 **Federated learning with tree-based models via Flower.**
 
 `flwr-trees` is a Python library that exposes scikit-learn-compatible federated estimators for Random Forests, XGBoost, and Gradient Boosted Trees, backed by the [Flower](https://flower.ai) federated learning framework. All estimators satisfy the scikit-learn `BaseEstimator` contract and pass `check_estimator()`, making them drop-in replacements inside any existing `sklearn.pipeline.Pipeline`.
@@ -19,6 +24,7 @@
 - [Progress](#progress)
 - [Remaining Work](#remaining-work)
 - [Development](#development)
+- [Citation](#citation)
 - [License](#license)
 
 ---
@@ -39,7 +45,12 @@ Bagging and histogram strategies are implemented using real Flower `Strategy` / 
 
 ## Installation
 
-Requires **Python >= 3.13**.
+Requires **Python >= 3.10**.
+
+> **PyPI release coming soon.** Install from source for now.
+> ```bash
+> pip install git+https://github.com/MAUK9086/flwr-trees.git
+> ```
 
 ```bash
 # Install with uv (recommended)
@@ -250,10 +261,10 @@ Communication-efficiency comparison between `FedForestBagging` and `FedHistogram
 
 | Dataset | Method | Round-1 Bytes | Accuracy | Round-1 Savings |
 |---|---|---|---|---|
-| synthetic_iid | FedForestBagging | 450 KB | 0.9100 | — |
-| synthetic_iid | FedHistogramAggregation | 78 KB | 0.8800 | 82.8% |
 | breast_cancer | FedForestBagging | 212 KB | 0.9737 | — |
 | breast_cancer | FedHistogramAggregation | 116 KB | 0.9649 | 45.2% |
+| synthetic_iid | FedForestBagging | 450 KB | 0.9100 | — |
+| synthetic_iid | FedHistogramAggregation | 78 KB | 0.8800 | 82.8% |
 | synthetic_noniid (alpha=0.3) | FedForestBagging | 400 KB | 0.6650 | — |
 | synthetic_noniid (alpha=0.3) | FedHistogramAggregation | 78 KB | 0.7000 | 80.6% |
 
@@ -274,7 +285,7 @@ The full benchmark is in `benchmarks/communication_benchmark.py` (Figure 1 data)
 | 5 | `FedHistogramAggregation` + `FederatedHistogramRFClassifier/Regressor` (research contribution) | Complete | 11 |
 | 6 | `FederatedGBTClassifier/Regressor`, `ClientDropoutWrapper`, `NoisyHistogram`, `DPTreeWrapper`, real-world benchmarks | Complete | 51 |
 
-**Total: 146 tests passing** (`pytest tests/ -v`), including full `sklearn.utils.estimator_checks.check_estimator()` compliance for all eight estimators.
+**Total: 171 tests passing** (`pytest tests/ -v`), including full `sklearn.utils.estimator_checks.check_estimator()` compliance for all eight estimators.
 
 ---
 
@@ -325,6 +336,21 @@ python benchmarks/real_world_benchmark.py --skip-higgs
 
 # Lint
 ruff check src/
+```
+
+---
+
+## Citation
+
+If you use flwr-trees in research, please cite:
+
+```bibtex
+@software{flwr_trees_2025,
+  author = {Mauktik},
+  title = {flwr-trees: Federated Learning with Tree-Based Models},
+  year = {2025},
+  url = {https://github.com/MAUK9086/flwr-trees},
+}
 ```
 
 ---
