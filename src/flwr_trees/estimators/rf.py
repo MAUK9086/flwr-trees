@@ -121,7 +121,7 @@ class FederatedRandomForestClassifier(ClassifierMixin, BaseFederatedTreeEstimato
         # original y dtype (int, float, string, …).  self.classes_ retains
         # the original labels for decode-on-predict.
         le = LabelEncoder()
-        le.fit_transform(y_np)  # fit le; y_enc not needed here
+        le.fit(y_np)
         self.classes_ = le.classes_
 
         n_samples = X_np.shape[0]

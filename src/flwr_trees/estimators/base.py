@@ -109,6 +109,14 @@ class BaseFederatedTreeEstimator(BaseEstimator, ABC):
             return float(accuracy_score(y_np, y_pred, sample_weight=sample_weight))
         return float(r2_score(y_np, y_pred, sample_weight=sample_weight))
 
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state.pop("strategy_", None)
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+
     def _validate_data_federated(
         self,
         X: ArrayLike,

@@ -7,8 +7,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.utils.estimator_checks import check_estimator
 
+from sklearn.datasets import make_regression
+
 from flwr_trees.aggregation.histogram import FedHistogramAggregation
-from flwr_trees.estimators.hist_rf import FederatedHistogramRFClassifier
+from flwr_trees.estimators.hist_rf import FederatedHistogramRFClassifier, FederatedHistogramRFRegressor
 from flwr_trees.estimators.rf import FederatedRandomForestClassifier
 
 _N_ESTIMATORS = 5
@@ -166,3 +168,19 @@ def test_histogram_bytes_sent_per_round_has_two_entries() -> None:
 
 def test_histogram_check_estimator() -> None:
     check_estimator(FederatedHistogramRFClassifier(n_estimators=5))
+
+
+def test_histogram_regressor_flower_path() -> None:
+    X, y = make_regression(n_samples=200, n_features=5, random_state=0)
+    reg = FederatedHistogramRFRegressor(
+        n_estimators=5,
+        n_clients=3,
+        n_rounds=1,
+        n_bins=8,
+        use_flower=True,
+        random_state=42,
+    )
+    reg.fit(X, y)
+    preds = reg.predict(X)
+    assert preds.shape == (200,)
+    assert preds.dtype == np.float64
