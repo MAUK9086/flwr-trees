@@ -24,3 +24,9 @@ wheels/
 
 # Generated benchmark output
 benchmarks/real_world_results.json
+
+# Claude Code project file (local dev only)
+CLAUDE.md
+
+# uv lock file (library repos don't commit lock files)
+uv.lock

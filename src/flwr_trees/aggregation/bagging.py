@@ -5,9 +5,6 @@ import pickle
 from typing import Any
 
 import numpy as np
-from numpy.typing import NDArray
-from sklearn.ensemble import RandomForestClassifier
-
 from flwr.client import NumPyClient
 from flwr.common import (
     Code,
@@ -30,6 +27,8 @@ from flwr.common.typing import NDArrays, Scalar
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
+from numpy.typing import NDArray
+from sklearn.ensemble import RandomForestClassifier
 
 from flwr_trees.aggregation._tree_store import DiskTreeStore
 

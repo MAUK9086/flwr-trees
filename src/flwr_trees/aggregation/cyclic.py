@@ -6,8 +6,6 @@ from typing import Any
 
 import numpy as np
 import xgboost as xgb
-from numpy.typing import NDArray
-
 from flwr.client import NumPyClient
 from flwr.common import (
     Code,
@@ -30,6 +28,7 @@ from flwr.common.typing import NDArrays, Scalar
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
+from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 

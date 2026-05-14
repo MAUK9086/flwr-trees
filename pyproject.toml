@@ -10,7 +10,7 @@ name = "flwr-trees"
 version = "0.1.0"
 description = "Federated learning with tree-based models (Random Forest, XGBoost, GBT) via Flower"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 keywords = ["federated learning", "random forest", "xgboost", "flower", "scikit-learn"]
 classifiers = [
@@ -18,8 +18,14 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+authors = [
+    { name = "Mauktik", email = "maukhan9086@gmail.com" }
 ]
 dependencies = [
     "flwr>=1.29.0",
@@ -28,6 +34,12 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "xgboost>=3.2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/MAUK9086/flwr-trees"
+Repository = "https://github.com/MAUK9086/flwr-trees"
+"Bug Tracker" = "https://github.com/MAUK9086/flwr-trees/issues"
+Documentation = "https://github.com/MAUK9086/flwr-trees#readme"
 
 [project.optional-dependencies]
 privacy = ["opacus>=1.4.0"]
@@ -40,3 +52,20 @@ dev = [
     "pytest>=9.0.3",
     "ruff>=0.15.12",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+ignore_missing_imports = true
