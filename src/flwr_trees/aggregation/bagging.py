@@ -31,6 +31,8 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
 
+from flwr_trees.aggregation._tree_store import DiskTreeStore
+
 logger = logging.getLogger(__name__)
 
 
@@ -198,14 +200,14 @@ class FedForestBagging(Strategy):
         Total serialized bytes received from all clients in each round.
         Populated in ``aggregate_fit()``; length equals the number of
         completed rounds.
-    trees_ : list
+    trees_ : DiskTreeStore
         All deserialized decision trees accumulated across every round and
-        every client.
+        every client.  Stored on disk to bound memory usage with large ensembles.
     """
 
     def __init__(self) -> None:
         self.bytes_sent_per_round: list[int] = []
-        self.trees_: list = []
+        self.trees_: DiskTreeStore = DiskTreeStore()
 
     def initialize_parameters(
         self,

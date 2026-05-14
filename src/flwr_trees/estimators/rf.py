@@ -256,7 +256,7 @@ class FederatedRandomForestClassifier(ClassifierMixin, BaseFederatedTreeEstimato
                 len(strategy.trees_),
             )
 
-        self.estimators_: list[DecisionTreeClassifier] = strategy.trees_
+        self.estimators_ = strategy.trees_  # type: ignore[assignment]
         self.strategy_ = strategy
 
     def predict_proba(self, X: ArrayLike) -> NDArray:

@@ -31,6 +31,8 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
 
+from flwr_trees.aggregation._tree_store import DiskTreeStore
+
 logger = logging.getLogger(__name__)
 
 
@@ -318,8 +320,9 @@ class FedHistogramAggregation(Strategy):
     bytes_saved_vs_bagging : list[int]
         Retrospective savings: ``tree_bytes − histogram_bytes`` after each
         tree round.  Positive when histograms are smaller than trees.
-    trees_ : list of DecisionTreeClassifier or DecisionTreeRegressor
+    trees_ : DiskTreeStore
         All trees accumulated across all tree rounds and all clients.
+        Stored on disk to bound memory usage with large ensembles.
     thresholds_ : list of NDArray
         Global split thresholds (bin edges) per feature, set after round 1.
     """
@@ -328,7 +331,7 @@ class FedHistogramAggregation(Strategy):
         self.n_bins = n_bins
         self.bytes_sent_per_round: list[int] = []
         self.bytes_saved_vs_bagging: list[int] = []
-        self.trees_: list[DecisionTreeClassifier | DecisionTreeRegressor] = []
+        self.trees_: DiskTreeStore = DiskTreeStore()
         self.thresholds_: list[NDArray] = []
         self.global_edges_: list[NDArray] = []
         self._histogram_bytes: int = 0
