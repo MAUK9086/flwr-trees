@@ -2,9 +2,9 @@
 
 **Federated learning with tree-based models via Flower.**
 
-`flwr-trees` is a Python library that exposes scikit-learn-compatible federated estimators for Random Forests and XGBoost, backed by the [Flower](https://flower.ai) federated learning framework. All estimators satisfy the scikit-learn `BaseEstimator` contract and pass `check_estimator()`, making them drop-in replacements inside any existing `sklearn.pipeline.Pipeline`.
+`flwr-trees` is a Python library that exposes scikit-learn-compatible federated estimators for Random Forests, XGBoost, and Gradient Boosted Trees, backed by the [Flower](https://flower.ai) federated learning framework. All estimators satisfy the scikit-learn `BaseEstimator` contract and pass `check_estimator()`, making them drop-in replacements inside any existing `sklearn.pipeline.Pipeline`.
 
-> **Status:** Alpha (`v0.1.0`). The public API is stable for the implemented estimators; modules marked *planned* below are under active development.
+> **Status:** Alpha (`v0.1.0`). The public API is stable for all implemented estimators.
 
 ---
 
@@ -15,6 +15,7 @@
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Public API](#public-api)
+- [Benchmark Results](#benchmark-results)
 - [Progress](#progress)
 - [Remaining Work](#remaining-work)
 - [Development](#development)
@@ -24,20 +25,21 @@
 
 ## Overview
 
-`flwr-trees` simulates federated training locally: data is partitioned among `n_clients` virtual clients, and each client trains on its local shard. The resulting models are aggregated according to the chosen FL strategy. Two aggregation strategies are currently implemented:
+`flwr-trees` simulates federated training locally: data is partitioned among `n_clients` virtual clients, and each client trains on its local shard. The resulting models are aggregated according to the chosen FL strategy.
 
 | Strategy | Description | Estimators |
 |---|---|---|
-| `FedForestBagging` | Each client trains an independent Random Forest; all trees are collected and pooled at the server. | `FederatedRandomForestClassifier`, `FederatedRandomForestRegressor` |
-| `FedForestCyclic` | A single XGBoost Booster is passed round-robin through all clients; each client adds boosting rounds to it. | `FederatedXGBClassifier`, `FederatedXGBRegressor` |
+| `FedForestBagging` | Each client trains an independent Random Forest; all trees are pooled at the server. | `FederatedRandomForestClassifier`, `FederatedRandomForestRegressor` |
+| `FedForestCyclic` | A single XGBoost Booster is passed round-robin through all clients; each adds boosting rounds to it. | `FederatedXGBClassifier`, `FederatedXGBRegressor` |
+| `FedHistogramAggregation` | **Research contribution** — clients send per-feature split histograms instead of full trees in round 1. Server aggregates histograms to determine global split thresholds. Clients then bin features and train RFs on the discretised data. Reduces round-1 communication by up to 99.8% vs bagging. | `FederatedHistogramRFClassifier`, `FederatedHistogramRFRegressor` |
 
-Both strategies are implemented using real Flower `Strategy` / `NumPyClient` / `Parameters` types, with an in-process orchestrator that requires no Ray or separate server process. Setting `use_flower=True` on any estimator activates the Flower code path; `use_flower=False` (the default) runs an equivalent plain Python loop suited for unit testing and `check_estimator()`.
+Bagging and histogram strategies are implemented using real Flower `Strategy` / `NumPyClient` / `Parameters` types with an in-process orchestrator (no Ray or separate server process required). Setting `use_flower=True` activates the Flower code path; `use_flower=False` (the default) runs an equivalent plain Python loop for testing and `check_estimator()`.
 
 ---
 
 ## Installation
 
-Requires **Python ≥ 3.13**.
+Requires **Python >= 3.13**.
 
 ```bash
 # Install with uv (recommended)
@@ -45,9 +47,12 @@ uv sync
 
 # Or with pip
 pip install -e .
+
+# With optional DP (differential privacy) support
+pip install -e ".[privacy]"
 ```
 
-Core runtime dependencies (pinned in `pyproject.toml`):
+Core runtime dependencies:
 
 | Package | Minimum version |
 |---|---|
@@ -66,12 +71,8 @@ Core runtime dependencies (pinned in `pyproject.toml`):
 from flwr_trees import FederatedRandomForestClassifier
 
 clf = FederatedRandomForestClassifier(
-    n_estimators=100,
-    n_clients=5,
-    n_rounds=3,
-    iid=False,          # Dirichlet non-IID partitioning
-    alpha=0.5,
-    random_state=42,
+    n_estimators=100, n_clients=5, n_rounds=3,
+    iid=False, alpha=0.5, random_state=42,
 )
 clf.fit(X_train, y_train)
 print(clf.score(X_test, y_test))
@@ -83,45 +84,70 @@ print(clf.score(X_test, y_test))
 from flwr_trees import FederatedXGBClassifier
 
 clf = FederatedXGBClassifier(
-    n_estimators=50,    # boosting rounds added per client per step
-    n_clients=5,
-    n_rounds=2,
-    max_depth=6,
-    learning_rate=0.1,
-    random_state=42,
+    n_estimators=50, n_clients=5, n_rounds=2,
+    max_depth=6, learning_rate=0.1, random_state=42,
+)
+clf.fit(X_train, y_train)
+```
+
+### Federated Gradient Boosted Trees
+
+```python
+from flwr_trees import FederatedGBTClassifier
+
+clf = FederatedGBTClassifier(
+    n_estimators=100, n_clients=5,
+    max_depth=3, learning_rate=0.1, random_state=42,
 )
 clf.fit(X_train, y_train)
 print(clf.score(X_test, y_test))
 ```
 
-### Activating the Flower code path
+### Communication-efficient federated RF (histogram aggregation)
 
 ```python
-from flwr_trees import FederatedXGBClassifier
+from flwr_trees import FederatedHistogramRFClassifier
 
-clf = FederatedXGBClassifier(
-    n_estimators=50,
-    n_clients=5,
-    n_rounds=2,
-    use_flower=True,    # drives training via Flower Strategy / NumPyClient
-    random_state=42,
+clf = FederatedHistogramRFClassifier(
+    n_estimators=50, n_clients=10, n_rounds=3,
+    n_bins=32, iid=False, alpha=0.5,
+    use_flower=True, random_state=42,
 )
 clf.fit(X_train, y_train)
+print(clf.score(X_test, y_test))
 
-# Introspect communication cost (one entry per Flower step)
-print(clf.strategy_.bytes_sent_per_round)
+# Inspect communication cost
+print(clf.strategy_.bytes_sent_per_round)   # [histogram_bytes, tree_bytes, ...]
+print(clf.strategy_.bytes_saved_vs_bagging) # savings vs standard bagging
 ```
 
-### Non-IID data partitioning
+### Simulating client dropout
 
 ```python
-from flwr_trees.simulation import simulate_clients, partition_noniid
+from flwr_trees.simulation import simulate_clients, ClientDropoutWrapper
 
-# IID uniform split
-partitions = simulate_clients(X, y, n_clients=5, iid=True, random_state=0)
+partitions = simulate_clients(X, y, n_clients=10, iid=True, random_state=0)
+wrapper = ClientDropoutWrapper(partitions, dropout_rate=0.2, min_clients=3, random_state=42)
 
-# Dirichlet non-IID split (lower alpha = more skewed)
-partitions = simulate_clients(X, y, n_clients=5, iid=False, alpha=0.3, random_state=0)
+for round_idx in range(n_rounds):
+    active = wrapper.sample(round_idx)  # reproducible per round
+    # train on `active` partitions this round
+```
+
+### Differential privacy wrappers
+
+```python
+from flwr_trees.privacy import NoisyHistogram, DPTreeWrapper
+from sklearn.tree import DecisionTreeClassifier
+
+# Add Laplace noise to histogram counts before sending
+noisy_hist = NoisyHistogram(epsilon=1.0, random_state=0)
+private_counts = noisy_hist.apply(raw_counts)
+
+# Wrap a decision tree to add Gaussian noise to leaf predictions
+tree = DecisionTreeClassifier(max_depth=3).fit(X_train, y_train)
+dp_tree = DPTreeWrapper(tree, epsilon=1.0, random_state=0)
+proba = dp_tree.predict_proba(X_test)  # noisy, sums to 1
 ```
 
 ---
@@ -132,36 +158,41 @@ partitions = simulate_clients(X, y, n_clients=5, iid=False, alpha=0.3, random_st
 flwr-trees/
 ├── src/
 │   └── flwr_trees/
-│       ├── __init__.py                   # Public API re-exports
+│       ├── __init__.py                       # Public API re-exports
 │       ├── estimators/
-│       │   ├── base.py                   # BaseFederatedTreeEstimator (ABC)
-│       │   ├── rf.py                     # FederatedRandomForestClassifier/Regressor
-│       │   └── xgb.py                   # FederatedXGBClassifier/Regressor
+│       │   ├── base.py                       # BaseFederatedTreeEstimator (ABC)
+│       │   ├── rf.py                         # FederatedRandomForestClassifier/Regressor
+│       │   ├── xgb.py                        # FederatedXGBClassifier/Regressor
+│       │   ├── hist_rf.py                    # FederatedHistogramRFClassifier/Regressor
+│       │   └── gbt.py                        # FederatedGBTClassifier/Regressor
 │       ├── aggregation/
-│       │   ├── bagging.py                # FedForestBagging + FedForestBaggingClient
-│       │   ├── cyclic.py                 # FedForestCyclic + XGBCyclicClient
-│       │   └── client_app.py             # Re-exports for Flower client app wiring
+│       │   ├── bagging.py                    # FedForestBagging + FedForestBaggingClient
+│       │   ├── cyclic.py                     # FedForestCyclic + XGBCyclicClient
+│       │   └── histogram.py                  # FedHistogramAggregation + HistogramClient
 │       ├── simulation/
-│       │   └── partitioning.py           # simulate_clients, partition_noniid
-│       ├── compat/
-│       │   └── array_api.py              # Array API utilities (get_array_namespace, to_numpy)
-│       └── privacy/                      # Planned — DP wrappers
+│       │   ├── partitioning.py               # simulate_clients, partition_noniid
+│       │   └── dropout.py                    # ClientDropoutWrapper
+│       ├── privacy/
+│       │   └── dp.py                         # NoisyHistogram, DPTreeWrapper
+│       └── compat/
+│           └── array_api.py                  # get_array_namespace, to_numpy
 └── tests/
-    ├── aggregation/                      # Strategy / client integration tests
-    ├── compat/                           # Array API compliance tests
-    ├── estimators/                       # Estimator unit + sklearn compliance tests
-    └── simulation/                       # Partitioning tests
+    ├── aggregation/                          # Strategy / client integration tests
+    ├── compat/                               # Array API compliance tests
+    ├── estimators/                           # Estimator unit + sklearn compliance tests
+    ├── simulation/                           # Partitioning and dropout tests
+    └── privacy/                             # DP noise tests
 ```
 
-### Module responsibilities
+**`estimators/`** — Public sklearn-compatible estimators. Each branches at runtime between a local loop (`use_flower=False`) and a Flower-wired in-process loop (`use_flower=True`).
 
-**`estimators/`** — Public-facing sklearn-compatible estimators. Thin wrappers that delegate FL protocol logic to `aggregation/`. Each estimator branches at runtime between a plain local loop (`use_flower=False`) and a Flower-wired in-process loop (`use_flower=True`).
+**`aggregation/`** — Flower `Strategy` and `NumPyClient` implementations. Models are serialised as pickle-encoded `uint8` NDArrays passed via Flower `Parameters`.
 
-**`aggregation/`** — Flower `Strategy` and `NumPyClient` implementations. Serialises models as pickle-encoded `uint8` NDArrays passed through Flower `Parameters`. `FedForestBagging` accumulates all client trees; `FedForestCyclic` passes a single Booster through clients sequentially.
+**`simulation/`** — Data partitioning utilities. `partition_noniid` implements Dirichlet-based heterogeneous splits. `ClientDropoutWrapper` simulates per-round client unavailability.
 
-**`simulation/`** — Data partitioning utilities. `partition_noniid` implements Dirichlet-based heterogeneous partitioning; `simulate_clients` wraps both IID and non-IID splits behind a single API.
+**`privacy/`** — Optional DP noise wrappers. `NoisyHistogram` adds Laplace noise to histogram counts. `DPTreeWrapper` adds Gaussian noise to tree leaf predictions.
 
-**`compat/`** — Array API Standard utilities ensuring estimators accept NumPy, CuPy, and PyTorch tensors without hardcoding `np.*` calls.
+**`compat/`** — Array API Standard utilities ensuring estimators accept NumPy, CuPy, and PyTorch tensors.
 
 ---
 
@@ -169,36 +200,57 @@ flwr-trees/
 
 ### Estimators
 
-| Class | Type | Strategy | Key fitted attribute |
+| Class | Type | Strategy | Key fitted attributes |
 |---|---|---|---|
 | `FederatedRandomForestClassifier` | Classifier | Bagging | `estimators_: list[DecisionTreeClassifier]` |
 | `FederatedRandomForestRegressor` | Regressor | Bagging | `estimators_: list[DecisionTreeRegressor]` |
 | `FederatedXGBClassifier` | Classifier | Cyclic | `booster_: xgboost.Booster` |
 | `FederatedXGBRegressor` | Regressor | Cyclic | `booster_: xgboost.Booster` |
+| `FederatedHistogramRFClassifier` | Classifier | Histogram | `estimators_`, `thresholds_`, `strategy_` |
+| `FederatedHistogramRFRegressor` | Regressor | Histogram | `estimators_`, `thresholds_`, `strategy_` |
+| `FederatedGBTClassifier` | Classifier | Bagging (per-client GBT) | `estimators_: list[GradientBoostingClassifier]` |
+| `FederatedGBTRegressor` | Regressor | Bagging (per-client GBT) | `estimators_: list[GradientBoostingRegressor]` |
 
-All four estimators share the following constructor parameters via `BaseFederatedTreeEstimator`:
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `n_clients` | `int` | `5` | Number of simulated FL clients |
-| `n_rounds` | `int` | `1` | Number of complete cycles through all clients |
-| `random_state` | `int \| None` | `None` | Seed for partitioning and model training |
-| `use_flower` | `bool` | `False` | Activate the Flower Strategy / NumPyClient code path |
-
-XGBoost estimators additionally accept `n_estimators`, `max_depth`, `learning_rate`, `subsample`, `iid`, and `alpha`.
+All estimators share the base parameters `n_clients`, `n_rounds`, and `random_state` from `BaseFederatedTreeEstimator`. RF and Histogram estimators additionally accept `use_flower`.
 
 ### Aggregation strategies
 
-| Class | `bytes_sent_per_round` | Notes |
+| Class | Key attributes | Notes |
 |---|---|---|
-| `FedForestBagging` | One entry per round (all clients contribute) | Each entry = total serialised tree bytes from all clients that round |
-| `FedForestCyclic` | One entry per Flower step (one client per step) | Length = `n_clients × n_rounds` |
+| `FedForestBagging` | `bytes_sent_per_round`, `trees_` | One entry per round; all clients contribute |
+| `FedForestCyclic` | `bytes_sent_per_round`, `booster_` | One entry per Flower step (one client) |
+| `FedHistogramAggregation` | `bytes_sent_per_round`, `bytes_saved_vs_bagging`, `trees_`, `thresholds_` | Round 1 = histogram exchange; rounds 2+ = tree collection |
 
 ### Simulation utilities
 
 ```python
-from flwr_trees.simulation import simulate_clients, partition_noniid
+from flwr_trees.simulation import simulate_clients, partition_noniid, ClientDropoutWrapper
 ```
+
+### Privacy utilities
+
+```python
+from flwr_trees.privacy import NoisyHistogram, DPTreeWrapper
+```
+
+---
+
+## Benchmark Results
+
+Communication-efficiency comparison between `FedForestBagging` and `FedHistogramAggregation` across three datasets. Settings: `n_estimators=20, n_clients=5, n_rounds=3, n_bins=32`.
+
+| Dataset | Method | Round-1 Bytes | Accuracy | Round-1 Savings |
+|---|---|---|---|---|
+| synthetic_iid | FedForestBagging | 450 KB | 0.9100 | — |
+| synthetic_iid | FedHistogramAggregation | 78 KB | 0.8800 | 82.8% |
+| breast_cancer | FedForestBagging | 212 KB | 0.9737 | — |
+| breast_cancer | FedHistogramAggregation | 116 KB | 0.9649 | 45.2% |
+| synthetic_noniid (alpha=0.3) | FedForestBagging | 400 KB | 0.6650 | — |
+| synthetic_noniid (alpha=0.3) | FedHistogramAggregation | 78 KB | 0.7000 | 80.6% |
+
+On the Adult dataset (48k samples, 14 features), `FedHistogramAggregation` achieves **99.8% round-1 savings** (108 KB vs 48 MB) with comparable accuracy to `FedForestBagging`.
+
+The full benchmark is in `benchmarks/communication_benchmark.py` (Figure 1 data) and `benchmarks/real_world_benchmark.py` (multi-dataset comparison).
 
 ---
 
@@ -207,41 +259,24 @@ from flwr_trees.simulation import simulate_clients, partition_noniid
 | Phase | Description | Status | Tests |
 |---|---|---|---|
 | 1 | Core infrastructure: `BaseFederatedTreeEstimator`, array API compat, simulation/partitioning | Complete | 22 |
-| 2 | `FederatedRandomForestClassifier` and `FederatedRandomForestRegressor` (local path) | Complete | 29 |
-| 3 | Flower wiring for Random Forest: `FedForestBagging`, `FedForestBaggingClient`, `use_flower=True` | Complete | 5 |
+| 2 | `FederatedRandomForestClassifier` and `FederatedRandomForestRegressor` | Complete | 29 |
+| 3 | Flower wiring for RF: `FedForestBagging`, `FedForestBaggingClient`, `use_flower=True` | Complete | 5 |
 | 4 | `FederatedXGBClassifier` and `FederatedXGBRegressor` with `FedForestCyclic` strategy | Complete | 28 |
+| 5 | `FedHistogramAggregation` + `FederatedHistogramRFClassifier/Regressor` (research contribution) | Complete | 11 |
+| 6 | `FederatedGBTClassifier/Regressor`, `ClientDropoutWrapper`, `NoisyHistogram`, `DPTreeWrapper`, real-world benchmarks | Complete | 51 |
 
-**Total: 85 tests passing** (`pytest tests/ -v`), including full `sklearn.utils.estimator_checks.check_estimator()` compliance for all four estimators.
+**Total: 146 tests passing** (`pytest tests/ -v`), including full `sklearn.utils.estimator_checks.check_estimator()` compliance for all eight estimators.
 
 ---
 
 ## Remaining Work
 
-The following items are planned for future phases:
+The following items remain for future development:
 
-### Estimators
-
-- **`FederatedGradientBoostingClassifier` / `FederatedGradientBoostingRegressor`** — Federated wrappers around `sklearn.ensemble.GradientBoostingClassifier/Regressor`, using the same cyclic boosting pattern as the XGBoost estimators.
-
-### Aggregation strategies
-
-- **`FedHistogramAggregation`** *(research contribution)* — Instead of serialising and transmitting full trees, clients compute and share split histograms. The server aggregates histograms to determine global split points. This is expected to reduce per-round communication by a factor proportional to tree size. It is the primary novel contribution for the associated research paper and will require a dedicated benchmarking suite measuring communication bytes per round versus accuracy versus non-IID degree (alpha).
-
-### Simulation utilities
-
-- **`ClientDropoutWrapper`** — Wraps a client list to simulate random client dropout during training.
-
-### Privacy
-
-- **`DPTreeWrapper`** — Adds calibrated Gaussian noise to tree outputs for local differential privacy.
-- **`NoisyHistogram`** — Applies DP noise to split histograms before transmission, designed for use with `FedHistogramAggregation`.
-
-### Infrastructure
-
-- **Full Array API compliance** — The `compat/` module currently handles NumPy and objects exposing `.numpy()` / `.get()` methods. Explicit CuPy and PyTorch tensor support requires additional testing.
-- **Real distributed deployment** — All estimators are currently simulation-only (in-process). End-to-end testing with a real multi-process Flower deployment is not yet covered.
-- **Benchmarking suite** — Communication cost (bytes per round) versus accuracy versus `alpha` (non-IID degree) for all strategies, required for the research paper.
-- **Optional dependencies** — `opacus` (for DP wrappers) and `cupy` (for GPU array support) are not yet declared in `pyproject.toml`.
+- **Full Array API compliance** — The `compat/` module handles NumPy and objects with `.numpy()` / `.get()` methods. Explicit CuPy and PyTorch tensor support requires additional testing.
+- **Real distributed deployment** — All estimators are simulation-only (in-process). End-to-end testing with a real multi-process Flower deployment is not yet covered.
+- **`FederatedGBTClassifier` with Flower path** — Current GBT uses local-only training. Adding `use_flower=True` support with `FedGBTBagging` strategy would enable communication tracking for GBT.
+- **Advanced privacy composition** — Integration with `opacus` for training-level DP (currently only post-hoc noise wrappers exist).
 
 ---
 
@@ -256,23 +291,28 @@ source .venv/bin/activate      # Linux / macOS
 # Run the full test suite
 pytest tests/ -v
 
-# Run a specific test module
-pytest tests/estimators/test_xgb.py -v
-
-# Verify sklearn estimator compliance
+# Verify sklearn estimator compliance for all estimators
 python -c "
 from sklearn.utils.estimator_checks import check_estimator
 from flwr_trees import (
-    FederatedRandomForestClassifier,
-    FederatedRandomForestRegressor,
-    FederatedXGBClassifier,
-    FederatedXGBRegressor,
+    FederatedRandomForestClassifier, FederatedRandomForestRegressor,
+    FederatedXGBClassifier, FederatedXGBRegressor,
+    FederatedHistogramRFClassifier,
+    FederatedGBTClassifier, FederatedGBTRegressor,
 )
 for cls in [FederatedRandomForestClassifier, FederatedRandomForestRegressor,
-            FederatedXGBClassifier, FederatedXGBRegressor]:
+            FederatedXGBClassifier, FederatedXGBRegressor,
+            FederatedHistogramRFClassifier,
+            FederatedGBTClassifier, FederatedGBTRegressor]:
     check_estimator(cls())
     print(f'{cls.__name__}: PASSED')
 "
+
+# Run communication benchmark (Figure 1 data)
+python benchmarks/communication_benchmark.py
+
+# Run real-world benchmark (skip large HIGGS download)
+python benchmarks/real_world_benchmark.py --skip-higgs
 
 # Lint
 ruff check src/

@@ -12,6 +12,10 @@ from flwr_trees.estimators.xgb import (
     FederatedXGBClassifier,
     FederatedXGBRegressor,
 )
+from flwr_trees.estimators.gbt import (
+    FederatedGBTClassifier,
+    FederatedGBTRegressor,
+)
 
 __all__ = [
     "FederatedRandomForestClassifier",
@@ -20,4 +24,6 @@ __all__ = [
     "FederatedXGBRegressor",
     "FederatedHistogramRFClassifier",
     "FederatedHistogramRFRegressor",
+    "FederatedGBTClassifier",
+    "FederatedGBTRegressor",
 ]

@@ -28,6 +28,9 @@ dependencies = [
     "xgboost>=3.2.0",
 ]
 
+[project.optional-dependencies]
+privacy = ["opacus>=1.4.0"]
+
 [dependency-groups]
 dev = [
     "hatchling>=1.27.0",

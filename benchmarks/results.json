@@ -1,0 +1,116 @@
+[
+  {
+    "dataset": "synthetic_iid",
+    "iid": true,
+    "alpha": 0.5,
+    "bagging": {
+      "method": "FedForestBagging",
+      "round1_bytes": 450460,
+      "total_bytes": 1351380,
+      "bytes_per_round": [
+        450460,
+        450460,
+        450460
+      ],
+      "n_flower_rounds": 3,
+      "accuracy": 0.91,
+      "time_s": 2.427
+    },
+    "histogram": {
+      "method": "FedHistogramAggregation",
+      "round1_bytes": 77600,
+      "total_bytes": 1550420,
+      "bytes_per_round": [
+        77600,
+        490940,
+        490940,
+        490940
+      ],
+      "n_flower_rounds": 4,
+      "bytes_saved_vs_bagging": [
+        413340
+      ],
+      "accuracy": 0.88,
+      "time_s": 0.643
+    },
+    "round1_savings_bytes": 372860,
+    "round1_savings_pct": 82.77,
+    "accuracy_delta": -0.03
+  },
+  {
+    "dataset": "breast_cancer",
+    "iid": true,
+    "alpha": 0.5,
+    "bagging": {
+      "method": "FedForestBagging",
+      "round1_bytes": 212270,
+      "total_bytes": 636810,
+      "bytes_per_round": [
+        212270,
+        212270,
+        212270
+      ],
+      "n_flower_rounds": 3,
+      "accuracy": 0.9737,
+      "time_s": 0.595
+    },
+    "histogram": {
+      "method": "FedHistogramAggregation",
+      "round1_bytes": 116400,
+      "total_bytes": 790731,
+      "bytes_per_round": [
+        116400,
+        224777,
+        224777,
+        224777
+      ],
+      "n_flower_rounds": 4,
+      "bytes_saved_vs_bagging": [
+        108377
+      ],
+      "accuracy": 0.9649,
+      "time_s": 0.682
+    },
+    "round1_savings_bytes": 95870,
+    "round1_savings_pct": 45.16,
+    "accuracy_delta": -0.0088
+  },
+  {
+    "dataset": "synthetic_noniid",
+    "iid": false,
+    "alpha": 0.3,
+    "bagging": {
+      "method": "FedForestBagging",
+      "round1_bytes": 399657,
+      "total_bytes": 1198971,
+      "bytes_per_round": [
+        399657,
+        399657,
+        399657
+      ],
+      "n_flower_rounds": 3,
+      "accuracy": 0.665,
+      "time_s": 0.684
+    },
+    "histogram": {
+      "method": "FedHistogramAggregation",
+      "round1_bytes": 77600,
+      "total_bytes": 1363967,
+      "bytes_per_round": [
+        77600,
+        428789,
+        428789,
+        428789
+      ],
+      "n_flower_rounds": 4,
+      "bytes_saved_vs_bagging": [
+        351189
+      ],
+      "accuracy": 0.7,
+      "time_s": 0.652
+    },
+    "round1_savings_bytes": 322057,
+    "round1_savings_pct": 80.58,
+    "accuracy_delta": 0.035
+  }
+]
