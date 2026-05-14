@@ -100,7 +100,7 @@ def _datasets(skip_higgs: bool) -> list[tuple[str, np.ndarray, np.ndarray]]:
     for ds_name, version, max_rows in [
         ("adult", 2, None),
         ("credit-g", 1, None),
-        ("higgs", 1, 10_000),
+        ("higgs", 1, 50_000),
     ]:
         if ds_name == "higgs" and skip_higgs:
             print("[INFO] Skipping HIGGS dataset (--skip-higgs flag set)")
