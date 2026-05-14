@@ -47,12 +47,10 @@ Bagging and histogram strategies are implemented using real Flower `Strategy` / 
 
 Requires **Python >= 3.11**.
 
-> **PyPI release coming soon.** Install from source for now.
-> ```bash
-> pip install git+https://github.com/MAUK9086/flwr-trees.git
-> ```
-
 ```bash
+# Install with pip
+pip install flwr-trees
+
 # Install with uv (recommended)
 uv sync
 
