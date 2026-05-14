@@ -24,6 +24,7 @@ def _xgb_params(
     seed: int | None,
     objective: str,
     num_class: int | None = None,
+    device: str = "cpu",
 ) -> dict[str, Any]:
     """Build a native XGBoost params dict for ``xgb.train()``."""
     p: dict[str, Any] = {
@@ -37,6 +38,8 @@ def _xgb_params(
         p["seed"] = seed
     if num_class is not None:
         p["num_class"] = num_class
+    if device != "cpu":
+        p["device"] = device
     return p
 
 
@@ -100,6 +103,7 @@ class FederatedXGBClassifier(ClassifierMixin, BaseFederatedTreeEstimator):
         learning_rate: float = 0.1,
         subsample: float = 1.0,
         use_flower: bool = False,
+        device: str = "cpu",
         random_state: int | None = None,
     ) -> None:
         super().__init__(
@@ -114,6 +118,7 @@ class FederatedXGBClassifier(ClassifierMixin, BaseFederatedTreeEstimator):
         self.learning_rate = learning_rate
         self.subsample = subsample
         self.use_flower = use_flower
+        self.device = device
 
     def fit(
         self,
@@ -193,6 +198,7 @@ class FederatedXGBClassifier(ClassifierMixin, BaseFederatedTreeEstimator):
                     seed=client_seed,
                     objective=objective,
                     num_class=num_class,
+                    device=self.device,
                 )
                 dtrain = xgb.DMatrix(X_i, label=y_i)
                 booster = xgb.train(
@@ -248,6 +254,7 @@ class FederatedXGBClassifier(ClassifierMixin, BaseFederatedTreeEstimator):
                 seed=client_seed,
                 objective=objective,
                 num_class=num_class,
+                device=self.device,
             )
             xgb_params["_task"] = "classify"
             xgb_params["_num_boost_round"] = self.n_estimators
@@ -376,6 +383,7 @@ class FederatedXGBRegressor(RegressorMixin, BaseFederatedTreeEstimator):
         learning_rate: float = 0.1,
         subsample: float = 1.0,
         use_flower: bool = False,
+        device: str = "cpu",
         random_state: int | None = None,
     ) -> None:
         super().__init__(
@@ -390,6 +398,7 @@ class FederatedXGBRegressor(RegressorMixin, BaseFederatedTreeEstimator):
         self.learning_rate = learning_rate
         self.subsample = subsample
         self.use_flower = use_flower
+        self.device = device
 
     def fit(
         self,
@@ -453,6 +462,7 @@ class FederatedXGBRegressor(RegressorMixin, BaseFederatedTreeEstimator):
                     subsample=self.subsample,
                     seed=client_seed,
                     objective="reg:squarederror",
+                    device=self.device,
                 )
                 dtrain = xgb.DMatrix(X_i, label=y_i.astype(np.float32))
                 booster = xgb.train(
@@ -495,6 +505,7 @@ class FederatedXGBRegressor(RegressorMixin, BaseFederatedTreeEstimator):
                 subsample=self.subsample,
                 seed=client_seed,
                 objective="reg:squarederror",
+                device=self.device,
             )
             xgb_params["_task"] = "regress"
             xgb_params["_num_boost_round"] = self.n_estimators

@@ -109,6 +109,11 @@ class BaseFederatedTreeEstimator(BaseEstimator, ABC):
             return float(accuracy_score(y_np, y_pred, sample_weight=sample_weight))
         return float(r2_score(y_np, y_pred, sample_weight=sample_weight))
 
+    def __sklearn_tags__(self):  # type: ignore[override]
+        tags = super().__sklearn_tags__()
+        tags.array_api_support = False
+        return tags
+
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         state.pop("strategy_", None)

@@ -88,6 +88,13 @@ clf = FederatedXGBClassifier(
     max_depth=6, learning_rate=0.1, random_state=42,
 )
 clf.fit(X_train, y_train)
+
+# GPU acceleration (requires CUDA-capable GPU + XGBoost >= 2.0)
+clf_gpu = FederatedXGBClassifier(
+    n_estimators=50, n_clients=5, n_rounds=2,
+    device="cuda",  # or "cuda:0" for a specific device
+    random_state=42,
+)
 ```
 
 ### Federated Gradient Boosted Trees
@@ -212,6 +219,8 @@ flwr-trees/
 | `FederatedGBTRegressor` | Regressor | Bagging (per-client GBT) | `estimators_: list[GradientBoostingRegressor]` |
 
 All estimators share the base parameters `n_clients`, `n_rounds`, and `random_state` from `BaseFederatedTreeEstimator`. RF and Histogram estimators additionally accept `use_flower`.
+
+> GPU acceleration via `device='cuda'` is supported for `FederatedXGBClassifier` and `FederatedXGBRegressor` only. `FederatedRandomForest`, `FederatedHistogramRF`, and `FederatedGBT` estimators use CPU-only sklearn backends.
 
 ### Aggregation strategies
 
