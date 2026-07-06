@@ -157,3 +157,13 @@ def test_simulate_clients_passes_alpha_to_noniid() -> None:
     parts = simulate_clients(X, y, n_clients=3, iid=False, alpha=5.0, random_state=99)
     assert len(parts) == 3
     assert sum(len(yi) for _, yi in parts) == 600
+
+def test_partition_noniid_retries_resolve_unlucky_draw() -> None:
+    """random_state=45 on this shape used to raise ValueError deterministically
+    with a single-shot Dirichlet draw; retries should resolve it."""
+    X, y = make_classification(
+        n_samples=800, n_features=20, n_classes=2, weights=[0.7, 0.3], random_state=42
+    )
+    parts = partition_noniid(X, y, n_clients=10, alpha=0.5, random_state=45)
+    assert len(parts) == 10
+    assert all(len(yi) > 0 for _, yi in parts)

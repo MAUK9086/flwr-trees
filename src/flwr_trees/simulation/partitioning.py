@@ -17,6 +17,7 @@ def partition_noniid(
     n_clients: int,
     alpha: float = 0.5,
     random_state: _RNGSeed = None,
+    max_retries: int = 20,
 ) -> list[tuple[NDArray, NDArray]]:
     """Partition data among clients with non-IID skew via Dirichlet distribution.
 
@@ -24,6 +25,12 @@ def partition_noniid(
     ``Dirichlet([alpha] * n_clients)`` and assign the corresponding fraction
     of that class's samples to each client. Smaller ``alpha`` values produce
     more heterogeneous (non-IID) distributions; larger values approach IID.
+
+    On small datasets with many clients, a single Dirichlet draw can by chance
+    leave one or more clients with zero samples. Rather than failing on the
+    first unlucky draw, this is retried up to ``max_retries`` times (reusing
+    the same RNG stream, so each attempt is a genuinely new draw) before
+    raising.
 
     Parameters
     ----------
@@ -38,6 +45,10 @@ def partition_noniid(
         single class; ``alpha → ∞`` approaches a uniform split.
     random_state : int, Generator, or None, default=None
         Seed or ``numpy.random.Generator`` instance for reproducibility.
+    max_retries : int, default=20
+        Number of times to retry the Dirichlet draw if any client ends up
+        empty, before raising ``ValueError``. Has no effect on datasets large
+        enough relative to ``n_clients`` that the first draw already succeeds.
 
     Returns
     -------
@@ -48,8 +59,9 @@ def partition_noniid(
     Raises
     ------
     ValueError
-        If any client ends up with zero samples. Increase ``alpha`` or reduce
-        ``n_clients`` relative to the number of samples.
+        If no attempt within ``max_retries`` leaves every client with at
+        least 1 sample (some clients still got 0 samples). Increase
+        ``alpha``, reduce ``n_clients``, or use a larger dataset.
 
     Examples
     --------
@@ -69,31 +81,37 @@ def partition_noniid(
     classes = np.unique(y_arr)
     client_indices: list[list[int]] = [[] for _ in range(n_clients)]
 
-    for cls in classes:
-        cls_indices = np.where(y_arr == cls)[0]
-        rng.shuffle(cls_indices)
-        proportions = rng.dirichlet(np.full(n_clients, alpha))
-        splits = np.clip(
-            (np.cumsum(proportions[:-1]) * len(cls_indices)).round().astype(int),
-            0,
-            len(cls_indices),
+    for attempt in range(max_retries):
+        client_indices = [[] for _ in range(n_clients)]
+        for cls in classes:
+            cls_indices = np.where(y_arr == cls)[0]
+            rng.shuffle(cls_indices)
+            proportions = rng.dirichlet(np.full(n_clients, alpha))
+            splits = np.clip(
+                (np.cumsum(proportions[:-1]) * len(cls_indices)).round().astype(int),
+                0,
+                len(cls_indices),
+            )
+            for i, sub in enumerate(np.split(cls_indices, splits)):
+                client_indices[i].extend(sub.tolist())
+
+        if all(len(idx) > 0 for idx in client_indices):
+            break
+    else:
+        raise ValueError(
+            f"Could not partition into {n_clients} non-empty clients after "
+            f"{max_retries} attempts (some clients still got 0 samples). "
+            "Try increasing alpha, reducing n_clients, or using a larger "
+            "dataset."
         )
-        for i, sub in enumerate(np.split(cls_indices, splits)):
-            client_indices[i].extend(sub.tolist())
 
     partitions: list[tuple[NDArray, NDArray]] = []
-    for i, indices in enumerate(client_indices):
-        if len(indices) == 0:
-            raise ValueError(
-                f"Client {i} received 0 samples. "
-                "Try increasing alpha or reducing n_clients."
-            )
+    for indices in client_indices:
         idx = np.array(indices)
         rng.shuffle(idx)
         partitions.append((X_arr[idx], y_arr[idx]))
 
     return partitions
-
 
 def simulate_clients(
     X: NDArray,
